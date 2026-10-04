@@ -32,7 +32,21 @@ MUST_JOIN_CHANNEL = os.environ.get("MUST_JOIN_CHANNEL", "@your_channel_username"
 DB_PATH = os.environ.get("DB_PATH", "bot_database.db")
 
 bot = telebot.TeleBot(TOKEN)
-SERVER_INFO_TEXT = "🔷 የሰርቨር አገልግሎት መረጃ: በቴሌብር 150 ብር በመክፈል ያድሱ። ከክፍያ በኋላ ደረሰኙን (Screenshot) በዚህ ቦት ይላኩ።"
+
+# **የሰርቨር እና የእቃ ግዢ የተለዩ መልዕክቶች ከዩዘርናም ጋር**
+SERVER_INFO_TEXT = (
+    "🔷 **የሰርቨር አገልግሎት መረጃ:**\n\n"
+    "በቴሌብር 150 ብር በመክፈል ሰርቨርዎን ማደስ ይችላሉ።\n"
+    "ከክፍያ በኋላ የክፍያውን ደረሰኝ (Screenshot) በዚህ ቦት ይላኩን።\n\n"
+    "ለማስጨረስ ወይም ጥያቄ ካሎት በቀጥታ በዚህ ያናግሩን: 👉 @kerim2000"
+)
+
+BUY_ITEM_TEXT = (
+    "🛒 **እቃ ለመግዛት:**\n\n"
+    "የሚፈልጉትን እቃ ወይም ሪሲቨር ለመግዛት ከፈለጉ ከታች ባለው ዩዘርናም በቀጥታ ያናግሩን።\n\n"
+    "👉 @kerim2000"
+)
+
 ADMIN_STATE = {}
 
 def init_db():
@@ -138,14 +152,12 @@ def send_welcome(message):
     is_admin = (user_id == SUPER_ADMIN_ID)
     bot.send_message(message.chat.id, "ሰላም! እንኳን ወደ ሪሲቨር እና ቲቪ ሶፍትዌር ማከማቻ ቦት በደህና መጡ።", reply_markup=main_menu(user_id, is_admin))
 
-# የክፍያ ደረሰኝ (Screenshot) እና የሰነድ አፕሎድ መቆጣጠሪያ
 @bot.message_handler(content_types=['document', 'photo'])
 def handle_media(message):
     global ADMIN_STATE
     user_id = message.from_user.id
     is_admin = (user_id == SUPER_ADMIN_ID)
 
-    # አድሚኑ ፋይል እየጫነ ከሆነ
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE[user_id], dict):
         state_data = ADMIN_STATE[user_id]
         if message.content_type != 'document':
@@ -186,7 +198,6 @@ def handle_media(message):
             
             bot.reply_to(message, f"🔥 **አዲስ ቲቪ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📺 ፎልደር፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
     
-    # ተራ ተጠቃሚ የክፍያ ደረሰኝ (Screenshot) ሲልክ ወደ አድሚን በፎርዋርድ መልክ መላክ
     elif not is_admin and message.content_type == 'photo':
         user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
         caption = f"💳 **አዲስ የክፍያ ደረሰኝ ደረሰ!**\n👤 ተጠቃሚ: {user_name}\n🆔 ID: `{user_id}`"
@@ -225,20 +236,29 @@ def handle_text(message):
         bot.send_message(message.chat.id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin))
         return
 
+    # **እቃ ለመግዛት እና ሰርቨር ለመግዛት የሚለውን ለይቶ ማስተናገድ**
+    if "እቃ ለመግዛት" in text:
+        bot.send_message(message.chat.id, BUY_ITEM_TEXT, parse_mode="Markdown")
+        return
+
+    if "SERVER ለመግዛት" in text:
+        bot.send_message(message.chat.id, SERVER_INFO_TEXT, parse_mode="Markdown")
+        return
+
     if text == "🔥 አዲስ የተለቀቁ":
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT receiver_key, file_name, id FROM bin_files ORDER BY id DESC LIMIT 10")
+        cursor.execute("SELECT receiver_key, file_name, file_size, id FROM bin_files ORDER BY id DESC LIMIT 10")
         recent_bin = cursor.fetchall()
-        cursor.execute("SELECT tv_key, file_name, id FROM tv_files ORDER BY id DESC LIMIT 10")
+        cursor.execute("SELECT tv_key, file_name, file_size, id FROM tv_files ORDER BY id DESC LIMIT 10")
         recent_tv = cursor.fetchall()
         conn.close()
 
         markup = InlineKeyboardMarkup()
-        for r_key, f_name, f_id in recent_bin:
-            markup.row(InlineKeyboardButton(f"📁 [ሪሲቨር] {r_key}: {f_name[:20]}", callback_data=f"get_rcv_{r_key}"))
-        for t_key, f_name, f_id in recent_tv:
-            markup.row(InlineKeyboardButton(f"📺 [ቲቪ] {t_key}: {f_name[:20]}", callback_data=f"get_tv_{t_key}"))
+        for r_key, f_name, f_size, f_id in recent_bin:
+            markup.row(InlineKeyboardButton(f"📁 [{r_key}] {f_name[:18]} ({f_size})", callback_data=f"get_rcv_{r_key}"))
+        for t_key, f_name, f_size, f_id in recent_tv:
+            markup.row(InlineKeyboardButton(f"📺 [{t_key}] {f_name[:18]} ({f_size})", callback_data=f"get_tv_{t_key}"))
 
         if recent_bin or recent_tv:
             bot.send_message(message.chat.id, "🔥 **በቅርብ ጊዜ የተለቀቁ አዳዲስ ሶፍትዌሮች፦**\nከታች ባሉት በተኖች በመጫን ማግኘት ይችላሉ።", reply_markup=markup, parse_mode="Markdown")
@@ -292,7 +312,6 @@ def handle_text(message):
         bot.send_message(message.chat.id, f"✅ መልእክቱ ለ **{count}** ተጠቃሚዎች ተልኳል!")
         return
 
-    # አጠቃላይ የፋይል ፍለጋ (Global File & Receiver Search)
     if user_id in ADMIN_STATE and ADMIN_STATE.get(user_id) == "WAITING_SEARCH":
         ADMIN_STATE.pop(user_id, None)
         query = text.strip().upper()
@@ -324,10 +343,6 @@ def handle_text(message):
 
     if "TV SOFTWARES" in text:
         bot.send_message(message.chat.id, "📺 ቲቪ ብራንድ ይምረጡ፦", reply_markup=tv_menu())
-        return
-
-    if "SERVER ለመግዛት" in text:
-        bot.send_message(message.chat.id, SERVER_INFO_TEXT)
         return
 
     if "🔍 ፋይል / ሪሲቨር ፈልግ" in text:
