@@ -1,9 +1,13 @@
 import os
 import sqlite3
+import logging
 from threading import Thread
 from flask import Flask
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+
+# የሎግ አሰራርን ማስተካከል
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # 1. Render ፖርት እንዲያገኝ አነስተኛ Web Server ማዘጋጀት
 app = Flask('')
@@ -19,38 +23,32 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-keep_alive()  # ዌብ ሰርቨሩን በጀርባ ማስነሳት
+keep_alive()
 
-# ከ Environment Variables ማንበብ (ለደህንነት ሲባል)
 TOKEN = os.environ.get("TOKEN", "YOUR_TOKEN_HERE")
 SUPER_ADMIN_ID = int(os.environ.get("SUPER_ADMIN_ID", "123456789"))
 MUST_JOIN_CHANNEL = os.environ.get("MUST_JOIN_CHANNEL", "@your_channel_username")
+
+DB_PATH = os.environ.get("DB_PATH", "bot_database.db")
 
 bot = telebot.TeleBot(TOKEN)
 SERVER_INFO_TEXT = "🔷 የሰርቨር አገልግሎት መረጃ: በቴሌብር 150 ብር በመክፈል ያድሱ። ከክፍያ በኋላ ደረሰኙን (Screenshot) በዚህ ቦት ይላኩ።"
 ADMIN_STATE = {}
 
 def init_db():
-    conn = sqlite3.connect("bot_database.db", check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS receivers (key TEXT PRIMARY KEY, caption TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS tv_software (key TEXT PRIMARY KEY, caption TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS bin_files (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS tv_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tv_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS bin_files (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    cursor.execute("CREATE TABLE IF NOT EXISTS tv_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tv_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS favorites (user_id INTEGER, receiver_key TEXT, PRIMARY KEY (user_id, receiver_key))")
-    cursor.execute("CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, photo_id TEXT, status TEXT DEFAULT 'PENDING')")
-
-    default_receivers = [
-        "FREE_SAT", "CORONATE", "MEWE", "TIGER", 
-        "LIFESTARE", "SUPERMAX", "GOLDSTAR", "LEG"
-    ]
+    
+    default_receivers = ["FREE_SAT", "CORONATE", "MEWE", "TIGER", "LIFESTARE", "SUPERMAX", "GOLDSTAR", "LEG"]
     for key in default_receivers:
         cursor.execute("INSERT OR IGNORE INTO receivers (key, caption) VALUES (?, ?)", (key, f"{key} RECEIVER SOFTWARE"))
 
-    default_tvs = [
-        "SAMSUNG", "LG", "HISENSE", "TCL", "TOAST", "SKYWORTH"
-    ]
+    default_tvs = ["SAMSUNG", "LG", "HISENSE", "TCL", "TOAST", "SKYWORTH"]
     for key in default_tvs:
         cursor.execute("INSERT OR IGNORE INTO tv_software (key, caption) VALUES (?, ?)", (key, f"{key} TV SOFTWARE"))
 
@@ -60,14 +58,17 @@ def init_db():
 init_db()
 
 def get_db_connection():
-    return sqlite3.connect("bot_database.db", check_same_thread=False)
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 def register_user(user_id, username):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logging.error(f"Error registering user: {e}")
 
 def check_user_joined(user_id):
     if not MUST_JOIN_CHANNEL or MUST_JOIN_CHANNEL == "@your_channel_username":
@@ -106,8 +107,8 @@ def main_menu(user_id, is_admin=False):
     markup.row(KeyboardButton("🛒 ✨ እቃ ለመግዛት ✨ 🛒"), KeyboardButton("🔷 SERVER ለመግዛት 🔷"))
     markup.row(KeyboardButton("💻 📚 HD RECEIVER SOFTWARES 📚 💻"))
     markup.row(KeyboardButton("📺 📚 TV SOFTWARES 📚 📺"))
-    markup.row(KeyboardButton("⭐ የእኔ ተወዳጆች"), KeyboardButton("🔥 አዲስ የተለቀቁ"))
-    markup.row(KeyboardButton("🔍 ሪሲቨር ፈልግ"))
+    markup.row(KeyboardButton("🔥 አዲስ የተለቀቁ"))
+    markup.row(KeyboardButton("🔍 ፋይል / ሪሲቨር ፈልግ"))
     if is_admin:
         markup.row(KeyboardButton("⚙ አድሚን ፓነል (Admin Panel)"))
     return markup
@@ -137,14 +138,20 @@ def send_welcome(message):
     is_admin = (user_id == SUPER_ADMIN_ID)
     bot.send_message(message.chat.id, "ሰላም! እንኳን ወደ ሪሲቨር እና ቲቪ ሶፍትዌር ማከማቻ ቦት በደህና መጡ።", reply_markup=main_menu(user_id, is_admin))
 
-@bot.message_handler(content_types=['document'])
-def handle_documents(message):
+# የክፍያ ደረሰኝ (Screenshot) እና የሰነድ አፕሎድ መቆጣጠሪያ
+@bot.message_handler(content_types=['document', 'photo'])
+def handle_media(message):
     global ADMIN_STATE
     user_id = message.from_user.id
     is_admin = (user_id == SUPER_ADMIN_ID)
 
+    # አድሚኑ ፋይል እየጫነ ከሆነ
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE[user_id], dict):
         state_data = ADMIN_STATE[user_id]
+        if message.content_type != 'document':
+            bot.send_message(message.chat.id, "⚠️ እባክዎ ትክክለኛ የሶፍትዌር ፋይል (.bin ወይም ዚፕ) ይላኩ።")
+            return
+
         file_id = message.document.file_id
         file_name = message.document.file_name or "unknown_file.bin"
         file_size_bytes = message.document.file_size or 0
@@ -161,8 +168,10 @@ def handle_documents(message):
             conn.close()
 
             markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton(f"📁 አሁን የተጫነውን 📂", callback_data=f"get_rcv_{target_rcv}"))
             markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
-            bot.reply_to(message, f"✅ **ተሳክቷል!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📂 ሪሲቨር ፎልደር፦ **{target_rcv}**", parse_mode="Markdown", reply_markup=markup)
+            
+            bot.reply_to(message, f"🔥 **አዲስ ሶፍትዌር ተለቀቀ! (Successfully Uploaded)**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📂 ፎልደር፦ **{target_rcv}**", parse_mode="Markdown", reply_markup=markup)
 
         elif state_data.get("state") == "WAITING_TV_FILE_UPLOAD":
             target_tv = state_data["target_tv"]
@@ -172,10 +181,28 @@ def handle_documents(message):
             conn.close()
 
             markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton(f"📺 ቲቪ ፎልደሩን አሳይ 📺", callback_data=f"get_tv_{target_tv}"))
             markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
-            bot.reply_to(message, f"✅ **ተሳክቷል!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📺 ቲቪ ፎልደር፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
+            
+            bot.reply_to(message, f"🔥 **አዲስ ቲቪ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📺 ፎልደር፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
+    
+    # ተራ ተጠቃሚ የክፍያ ደረሰኝ (Screenshot) ሲልክ ወደ አድሚን በፎርዋርድ መልክ መላክ
+    elif not is_admin and message.content_type == 'photo':
+        user_name = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+        caption = f"💳 **አዲስ የክፍያ ደረሰኝ ደረሰ!**\n👤 ተጠቃሚ: {user_name}\n🆔 ID: `{user_id}`"
+        
+        try:
+            bot.forward_message(SUPER_ADMIN_ID, message.chat.id, message.message_id)
+            bot.send_message(SUPER_ADMIN_ID, caption, parse_mode="Markdown")
+            bot.reply_to(message, "✅ የክፍያ ደረሰኝዎ ለአስተዳዳሪው ተልኳል። እባክዎ ትንሽ ይጠብቁ!")
+        except Exception as e:
+            logging.error(f"Error forwarding payment: {e}")
+            bot.reply_to(message, "⚠️ ደረሰኙን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።")
     else:
-        bot.send_message(message.chat.id, "⚠️ ፋይል ለመጫን መጀመሪያ ከአድሚን ፓነል ውስጥ ፎልደር ይምረጡ።")
+        if not is_admin:
+            bot.send_message(message.chat.id, "⚠️ እባክዎ የክፍያ ደረሰኝ ፎቶ (Screenshot) ብቻ ይላኩ።")
+        else:
+            bot.send_message(message.chat.id, "⚠️ ፋይል ለመጫን መጀመሪያ ከአድሚን ፓነል ውስጥ ፎልደር ይምረጡ።")
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
@@ -196,6 +223,27 @@ def handle_text(message):
     if text in ["🔝 Main Menu", "🔙 Back"]:
         ADMIN_STATE.pop(user_id, None)
         bot.send_message(message.chat.id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin))
+        return
+
+    if text == "🔥 አዲስ የተለቀቁ":
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT receiver_key, file_name, id FROM bin_files ORDER BY id DESC LIMIT 10")
+        recent_bin = cursor.fetchall()
+        cursor.execute("SELECT tv_key, file_name, id FROM tv_files ORDER BY id DESC LIMIT 10")
+        recent_tv = cursor.fetchall()
+        conn.close()
+
+        markup = InlineKeyboardMarkup()
+        for r_key, f_name, f_id in recent_bin:
+            markup.row(InlineKeyboardButton(f"📁 [ሪሲቨር] {r_key}: {f_name[:20]}", callback_data=f"get_rcv_{r_key}"))
+        for t_key, f_name, f_id in recent_tv:
+            markup.row(InlineKeyboardButton(f"📺 [ቲቪ] {t_key}: {f_name[:20]}", callback_data=f"get_tv_{t_key}"))
+
+        if recent_bin or recent_tv:
+            bot.send_message(message.chat.id, "🔥 **በቅርብ ጊዜ የተለቀቁ አዳዲስ ሶፍትዌሮች፦**\nከታች ባሉት በተኖች በመጫን ማግኘት ይችላሉ።", reply_markup=markup, parse_mode="Markdown")
+        else:
+            bot.send_message(message.chat.id, "⚠️ እስካሁን የተለቀቀ አዲስ ፋይል የለም።")
         return
 
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE.get(user_id), dict) and ADMIN_STATE[user_id].get("state") == "WAITING_NEW_FOLDER_NAME":
@@ -244,26 +292,34 @@ def handle_text(message):
         bot.send_message(message.chat.id, f"✅ መልእክቱ ለ **{count}** ተጠቃሚዎች ተልኳል!")
         return
 
+    # አጠቃላይ የፋይል ፍለጋ (Global File & Receiver Search)
     if user_id in ADMIN_STATE and ADMIN_STATE.get(user_id) == "WAITING_SEARCH":
         ADMIN_STATE.pop(user_id, None)
         query = text.strip().upper()
-        matching_rcv = [r for r in receivers if query in r]
-        matching_tv = [t for t in tvs if query in t]
         
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT receiver_key, file_name, file_id, file_size FROM bin_files WHERE file_name LIKE ? OR receiver_key LIKE ?", (f'%{query}%', f'%{query}%'))
+        matching_files = cursor.fetchall()
+        
+        cursor.execute("SELECT tv_key, file_name, file_id, file_size FROM tv_files WHERE file_name LIKE ? OR tv_key LIKE ?", (f'%{query}%', f'%{query}%'))
+        matching_tv_files = cursor.fetchall()
+        conn.close()
+
         markup = InlineKeyboardMarkup()
-        for m in matching_rcv:
-            markup.row(InlineKeyboardButton(f"📁 ሪሲቨር: {m}", callback_data=f"get_rcv_{m}"))
-        for m in matching_tv:
-            markup.row(InlineKeyboardButton(f"📺 ቲቪ: {m}", callback_data=f"get_tv_{m}"))
+        for r_key, f_name, f_id, f_size in matching_files[:5]:
+            markup.row(InlineKeyboardButton(f"📁 [{r_key}] {f_name[:22]}", callback_data=f"get_rcv_{r_key}"))
+        for t_key, f_name, f_id, f_size in matching_tv_files[:5]:
+            markup.row(InlineKeyboardButton(f"📺 [{t_key}] {f_name[:22]}", callback_data=f"get_tv_{t_key}"))
             
-        if matching_rcv or matching_tv:
-            bot.send_message(message.chat.id, "🔍 **የተገኙ ውጤቶች፦**", reply_markup=markup, parse_mode="Markdown")
+        if matching_files or matching_tv_files:
+            bot.send_message(message.chat.id, f"🔍 **'{query}' በሚለው ፍለጋ የተገኙ ፋይሎች፦**", reply_markup=markup, parse_mode="Markdown")
         else:
             bot.send_message(message.chat.id, "❌ ምንም የተገኘ ፋይል የለም።")
         return
 
     if "HD RECEIVER" in text:
-        bot.send_message(message.chat.id, "♦️ ሪሲቨር ፎልደር ይምረጡ፦", reply_markup=receivers_menu())
+        bot.send_message(message.chat.id, "♦ ሪሲቨር ፎልደር ይምረጡ፦", reply_markup=receivers_menu())
         return
 
     if "TV SOFTWARES" in text:
@@ -274,9 +330,9 @@ def handle_text(message):
         bot.send_message(message.chat.id, SERVER_INFO_TEXT)
         return
 
-    if "🔍 ሪሲቨር ፈልግ" in text:
+    if "🔍 ፋይል / ሪሲቨር ፈልግ" in text:
         ADMIN_STATE[user_id] = "WAITING_SEARCH"
-        bot.send_message(message.chat.id, "🔍 ለመፈለግ የሚፈልጉትን ስም ይጻፉልኝ፦")
+        bot.send_message(message.chat.id, "🔍 ለመፈለግ የሚፈልጉትን የሶፍትዌር ስም ወይም ሪሲቨር ብራንድ ይጻፉልኝ:")
         return
 
     if is_admin and "አድሚን ፓነል" in text:
@@ -294,12 +350,20 @@ def handle_text(message):
     if clean_text in receivers:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_id, file_size FROM bin_files WHERE receiver_key = ? ORDER BY id DESC LIMIT 1", (clean_text,))
-        file_data = cursor.fetchone()
+        cursor.execute("SELECT id, file_name, file_id, file_size, downloads_count FROM bin_files WHERE receiver_key = ? ORDER BY id DESC", (clean_text,))
+        files_data = cursor.fetchall()
         conn.close()
 
-        if file_data:
-            bot.send_document(message.chat.id, file_data[1], caption=f"✅ {file_data[0]}\n📦 መጠን: {file_data[2]}")
+        if files_data:
+            bot.send_message(message.chat.id, f"📁 ለ **{clean_text}** የተገኙ ፋይሎች ({len(files_data)} ፋይሎች):")
+            conn_update = get_db_connection()
+            cur_update = conn_update.cursor()
+            for f_id_db, f_name, f_id_tg, f_size, d_count in files_data:
+                new_count = d_count + 1
+                cur_update.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id_db))
+                bot.send_document(message.chat.id, f_id_tg, caption=f"✅ {f_name}\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ")
+            conn_update.commit()
+            conn_update.close()
         else:
             bot.send_message(message.chat.id, f"⚠️ ለ **{clean_text}** የተጫነ ሶፍትዌር የለም።")
         return
@@ -307,12 +371,20 @@ def handle_text(message):
     if clean_text in tvs:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_id, file_size FROM tv_files WHERE tv_key = ? ORDER BY id DESC LIMIT 1", (clean_text,))
-        file_data = cursor.fetchone()
+        cursor.execute("SELECT id, file_name, file_id, file_size, downloads_count FROM tv_files WHERE tv_key = ? ORDER BY id DESC", (clean_text,))
+        files_data = cursor.fetchall()
         conn.close()
 
-        if file_data:
-            bot.send_document(message.chat.id, file_data[1], caption=f"✅ {file_data[0]}\n📦 መጠን: {file_data[2]}")
+        if files_data:
+            bot.send_message(message.chat.id, f"📺 ለ **{clean_text}** የተገኙ ፋይሎች ({len(files_data)} ፋይሎች):")
+            conn_update = get_db_connection()
+            cur_update = conn_update.cursor()
+            for f_id_db, f_name, f_id_tg, f_size, d_count in files_data:
+                new_count = d_count + 1
+                cur_update.execute("UPDATE tv_files SET downloads_count = ? WHERE id = ?", (new_count, f_id_db))
+                bot.send_document(message.chat.id, f_id_tg, caption=f"✅ {f_name}\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ")
+            conn_update.commit()
+            conn_update.close()
         else:
             bot.send_message(message.chat.id, f"⚠️ ለ **{clean_text}** ቲቪ የተጫነ ሶፍትዌር የለም።")
         return
@@ -406,8 +478,8 @@ def handle_inline_callbacks(call):
 
     elif data == "adm_backup" and is_admin:
         bot.answer_callback_query(call.id, "💾 ባክአፕ በመላክ ላይ...", show_alert=False)
-        if os.path.exists("bot_database.db"):
-            with open("bot_database.db", "rb") as db_file:
+        if os.path.exists(DB_PATH):
+            with open(DB_PATH, "rb") as db_file:
                 bot.send_document(chat_id, db_file, caption="💾 **Database Backup**")
 
     elif data == "adm_stats" and is_admin:
@@ -423,18 +495,26 @@ def handle_inline_callbacks(call):
         f_cnt = cursor.fetchone()[0]
         conn.close()
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"📊 **ስታቲስቲክስ፦**\n\n👥 ተጠቃሚዎች: **{u_cnt}**\n📁 ሪሲቨር ፎልደሮች: **{r_cnt}**\n📺 ቲቪ ፎልደሮች: **{tv_cnt}**\n📄 ፋይሎች: **{f_cnt}**", parse_mode="Markdown")
+        bot.send_message(chat_id, f"📊 **አጠቃላይ ስታቲስቲክስ፦**\n\n👥 ጠቅላላ ተጠቃሚዎች: **{u_cnt}**\n📁 ሪሲቨር ፎልደሮች: **{r_cnt}**\n📺 ቲቪ ፎልደሮች: **{tv_cnt}**\n📄 የተጫኑ ፋይሎች: **{f_cnt}**", parse_mode="Markdown")
 
     elif data.startswith("get_rcv_"):
         rcv = data.replace("get_rcv_", "")
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_id, file_size FROM bin_files WHERE receiver_key = ? ORDER BY id DESC LIMIT 1", (rcv,))
-        file_data = cursor.fetchone()
+        cursor.execute("SELECT id, file_name, file_id, file_size, downloads_count FROM bin_files WHERE receiver_key = ? ORDER BY id DESC", (rcv,))
+        files_data = cursor.fetchall()
         conn.close()
         bot.answer_callback_query(call.id)
-        if file_data:
-            bot.send_document(chat_id, file_data[1], caption=f"✅ {file_data[0]}\n📦 መጠን: {file_data[2]}")
+        if files_data:
+            bot.send_message(chat_id, f"📁 ለ **{rcv}** የተገኙ ፋይሎች ({len(files_data)} ፋይሎች):")
+            conn_update = get_db_connection()
+            cur_update = conn_update.cursor()
+            for f_id_db, f_name, f_id_tg, f_size, d_count in files_data:
+                new_count = d_count + 1
+                cur_update.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id_db))
+                bot.send_document(chat_id, f_id_tg, caption=f"✅ {f_name}\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ")
+            conn_update.commit()
+            conn_update.close()
         else:
             bot.send_message(chat_id, f"⚠️ ፋይል አልተገኘም።")
 
@@ -442,12 +522,20 @@ def handle_inline_callbacks(call):
         tv = data.replace("get_tv_", "")
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_id, file_size FROM tv_files WHERE tv_key = ? ORDER BY id DESC LIMIT 1", (tv,))
-        file_data = cursor.fetchone()
+        cursor.execute("SELECT id, file_name, file_id, file_size, downloads_count FROM tv_files WHERE tv_key = ? ORDER BY id DESC", (tv,))
+        files_data = cursor.fetchall()
         conn.close()
         bot.answer_callback_query(call.id)
-        if file_data:
-            bot.send_document(chat_id, file_data[1], caption=f"✅ {file_data[0]}\n📦 መጠን: {file_data[2]}")
+        if files_data:
+            bot.send_message(chat_id, f"📺 ለ **{tv}** የተገኙ ፋይሎች ({len(files_data)} ፋይሎች):")
+            conn_update = get_db_connection()
+            cur_update = conn_update.cursor()
+            for f_id_db, f_name, f_id_tg, f_size, d_count in files_data:
+                new_count = d_count + 1
+                cur_update.execute("UPDATE tv_files SET downloads_count = ? WHERE id = ?", (new_count, f_id_db))
+                bot.send_document(chat_id, f_id_tg, caption=f"✅ {f_name}\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ")
+            conn_update.commit()
+            conn_update.close()
         else:
             bot.send_message(chat_id, f"⚠️ ፋይል አልተገኘም።")
 
