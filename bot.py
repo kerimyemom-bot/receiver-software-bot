@@ -1,12 +1,30 @@
-import sqlite3
-import datetime
 import os
+import sqlite3
+from threading import Thread
+from flask import Flask
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-TOKEN = "8968437244:AAHVhzoCY5weI1UGeVj5pMpbgilQbLbzI54"  # 👈 የቦትዎን ቶከን እዚህ ያስገቡ
-SUPER_ADMIN_ID = 596243071  # 👈 የራስዎን የቴሌግራም ID እዚህ ያስገቡ
-MUST_JOIN_CHANNEL = "@kerim20000"  # 👈 የቻናልዎን ዩዘርኔም እዚህ ያስገቡ (ለምሳሌ @MySatSoftware)
+# 1. Render ፖርት እንዲያገኝ አነስተኛ Web Server ማዘጋጀት
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is alive!"
+
+def run():
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
+
+keep_alive()  # ዌብ ሰርቨሩን በጀርባ ማስነሳት
+
+# ከ Environment Variables ማንበብ (ለደህንነት ሲባል)
+TOKEN = os.environ.get("TOKEN", "YOUR_TOKEN_HERE")
+SUPER_ADMIN_ID = int(os.environ.get("SUPER_ADMIN_ID", "123456789"))
+MUST_JOIN_CHANNEL = os.environ.get("MUST_JOIN_CHANNEL", "@your_channel_username")
 
 bot = telebot.TeleBot(TOKEN)
 SERVER_INFO_TEXT = "🔷 የሰርቨር አገልግሎት መረጃ: በቴሌብር 150 ብር በመክፈል ያድሱ። ከክፍያ በኋላ ደረሰኙን (Screenshot) በዚህ ቦት ይላኩ።"
@@ -16,14 +34,13 @@ def init_db():
     conn = sqlite3.connect("bot_database.db", check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS receivers (key TEXT PRIMARY KEY, caption TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS tv_software (key TEXT PRIMARY KEY, caption TEXT)")  # 👈 ለቲቪ ሶፍትዌር የተሰራ ሠንጠረዥ
+    cursor.execute("CREATE TABLE IF NOT EXISTS tv_software (key TEXT PRIMARY KEY, caption TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS bin_files (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS tv_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tv_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0)")  # 👈 ለቲቪ ፋይሎች
+    cursor.execute("CREATE TABLE IF NOT EXISTS tv_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tv_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0)")
     cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE TABLE IF NOT EXISTS favorites (user_id INTEGER, receiver_key TEXT, PRIMARY KEY (user_id, receiver_key))")
     cursor.execute("CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, photo_id TEXT, status TEXT DEFAULT 'PENDING')")
 
-    # ነባሪ የሪሲቨር ፎልደሮች
     default_receivers = [
         "FREE_SAT", "CORONATE", "MEWE", "TIGER", 
         "LIFESTARE", "SUPERMAX", "GOLDSTAR", "LEG"
@@ -31,7 +48,6 @@ def init_db():
     for key in default_receivers:
         cursor.execute("INSERT OR IGNORE INTO receivers (key, caption) VALUES (?, ?)", (key, f"{key} RECEIVER SOFTWARE"))
 
-    # ነባሪ የቲቪ ፎልደሮች
     default_tvs = [
         "SAMSUNG", "LG", "HISENSE", "TCL", "TOAST", "SKYWORTH"
     ]
@@ -89,7 +105,7 @@ def main_menu(user_id, is_admin=False):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(KeyboardButton("🛒 ✨ እቃ ለመግዛት ✨ 🛒"), KeyboardButton("🔷 SERVER ለመግዛት 🔷"))
     markup.row(KeyboardButton("💻 📚 HD RECEIVER SOFTWARES 📚 💻"))
-    markup.row(KeyboardButton("📺 📚 TV SOFTWARES 📚 📺"))  # 👈 አዲሱ የቲቪ ሶፍትዌር ሜኑ ከHD Receiver በታች ተጨመረ
+    markup.row(KeyboardButton("📺 📚 TV SOFTWARES 📚 📺"))
     markup.row(KeyboardButton("⭐ የእኔ ተወዳጆች"), KeyboardButton("🔥 አዲስ የተለቀቁ"))
     markup.row(KeyboardButton("🔍 ሪሲቨር ፈልግ"))
     if is_admin:
@@ -121,7 +137,6 @@ def send_welcome(message):
     is_admin = (user_id == SUPER_ADMIN_ID)
     bot.send_message(message.chat.id, "ሰላም! እንኳን ወደ ሪሲቨር እና ቲቪ ሶፍትዌር ማከማቻ ቦት በደህና መጡ።", reply_markup=main_menu(user_id, is_admin))
 
-# 1. የዶክመንት አፕሎድ መቆጣጠሪያ
 @bot.message_handler(content_types=['document'])
 def handle_documents(message):
     global ADMIN_STATE
@@ -162,7 +177,6 @@ def handle_documents(message):
     else:
         bot.send_message(message.chat.id, "⚠️ ፋይል ለመጫን መጀመሪያ ከአድሚን ፓነል ውስጥ ፎልደር ይምረጡ።")
 
-# 2. የጽሁፍ መልእክቶች መቆጣጠሪያ
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
     global ADMIN_STATE
@@ -184,7 +198,6 @@ def handle_text(message):
         bot.send_message(message.chat.id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin))
         return
 
-    # አዲስ ሪሲቨር ፎልደር መፍጠር
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE.get(user_id), dict) and ADMIN_STATE[user_id].get("state") == "WAITING_NEW_FOLDER_NAME":
         ADMIN_STATE.pop(user_id, None)
         new_key = text.strip().upper().replace(" ", "_")
@@ -199,7 +212,6 @@ def handle_text(message):
         conn.close()
         return
 
-    # አዲስ ቲቪ ፎልደር መፍጠር
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE.get(user_id), dict) and ADMIN_STATE[user_id].get("state") == "WAITING_NEW_TV_FOLDER_NAME":
         ADMIN_STATE.pop(user_id, None)
         new_key = text.strip().upper().replace(" ", "_")
@@ -214,7 +226,6 @@ def handle_text(message):
         conn.close()
         return
 
-    # ብሮድካስት
     if is_admin and user_id in ADMIN_STATE and ADMIN_STATE.get(user_id) == "WAITING_BROADCAST_MSG":
         ADMIN_STATE.pop(user_id, None)
         conn = get_db_connection()
@@ -233,7 +244,6 @@ def handle_text(message):
         bot.send_message(message.chat.id, f"✅ መልእክቱ ለ **{count}** ተጠቃሚዎች ተልኳል!")
         return
 
-    # ፍለጋ
     if user_id in ADMIN_STATE and ADMIN_STATE.get(user_id) == "WAITING_SEARCH":
         ADMIN_STATE.pop(user_id, None)
         query = text.strip().upper()
@@ -281,7 +291,6 @@ def handle_text(message):
 
     clean_text = clean_key(text)
     
-    # ሪሲቨር ፋይል መላክ
     if clean_text in receivers:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -295,7 +304,6 @@ def handle_text(message):
             bot.send_message(message.chat.id, f"⚠️ ለ **{clean_text}** የተጫነ ሶፍትዌር የለም።")
         return
 
-    # ቲቪ ፋይል መላክ
     if clean_text in tvs:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -306,10 +314,9 @@ def handle_text(message):
         if file_data:
             bot.send_document(message.chat.id, file_data[1], caption=f"✅ {file_data[0]}\n📦 መጠን: {file_data[2]}")
         else:
-            bot.send_message(message.chat.id, f"⚠️️ ለ **{clean_text}** ቲቪ የተጫነ ሶፍትዌር የለም።")
+            bot.send_message(message.chat.id, f"⚠️ ለ **{clean_text}** ቲቪ የተጫነ ሶፍትዌር የለም።")
         return
 
-# 3. የኢንላይን አዝራሮች መቆጣጠሪያ
 @bot.callback_query_handler(func=lambda call: True)
 def handle_inline_callbacks(call):
     global ADMIN_STATE
