@@ -33,11 +33,10 @@ DB_PATH = os.environ.get("DB_PATH", "bot_database.db")
 
 bot = telebot.TeleBot(TOKEN)
 
-# **የሰርቨር እና የእቃ ግዢ የተለዩ መልዕክቶች ከዩዘርናም ጋር**
+# **የሰርቨር እና የእቃ ግዢ የተለዩ መልዕክቶች (የዋጋ መጠኑ የጠፋበት)**
 SERVER_INFO_TEXT = (
     "🔷 **የሰርቨር አገልግሎት መረጃ:**\n\n"
-    "በቴሌብር 150 ብር በመክፈል ሰርቨርዎን ማደስ ይችላሉ።\n"
-    "ከክፍያ በኋላ የክፍያውን ደረሰኝ (Screenshot) በዚህ ቦት ይላኩን።\n\n"
+    "ሰርቨርዎን ማደስ ከፈለጉ ከክፍያ በኋላ የክፍያውን ደረሰኝ (Screenshot) በዚህ ቦት ይላኩን።\n\n"
     "ለማስጨረስ ወይም ጥያቄ ካሎት በቀጥታ በዚህ ያናግሩን: 👉 @kerim2000"
 )
 
@@ -208,7 +207,7 @@ def handle_media(message):
             bot.reply_to(message, "✅ የክፍያ ደረሰኝዎ ለአስተዳዳሪው ተልኳል። እባክዎ ትንሽ ይጠብቁ!")
         except Exception as e:
             logging.error(f"Error forwarding payment: {e}")
-            bot.reply_to(message, "⚠️ ደረሰኙን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።")
+            bot.reply_to(message, "⚠️️ ደረሰኙን መላክ አልተቻለም። እባክዎ እንደገና ይሞክሩ።")
     else:
         if not is_admin:
             bot.send_message(message.chat.id, "⚠️ እባክዎ የክፍያ ደረሰኝ ፎቶ (Screenshot) ብቻ ይላኩ።")
