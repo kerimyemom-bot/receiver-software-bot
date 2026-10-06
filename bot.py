@@ -8,10 +8,8 @@ from flask import Flask
 import telebot
 from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 
-# የሎግ አሰራርን ማስተካከል
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# 1. Render ፖርት እንዲያገኝ አነስተኛ Web Server ማዘጋጀት
 app = Flask('')
 
 @app.route('/')
@@ -34,7 +32,6 @@ DB_PATH = os.environ.get("DB_PATH", "bot_database.db")
 
 bot = telebot.TeleBot(TOKEN)
 
-# **የሰርቨር እና የእቃ ግዢ የተለዩ መልዕክቶች**
 SERVER_INFO_TEXT = (
     "🔷 **የሰርቨር አገልግሎት መረጃ:**\n\n"
     "ሰርቨርዎን ማደስ ከፈለጉ ከክፍያ በኋላ የክፍያውን ደረሰኝ (Screenshot) በዚህ ቦት ይላኩን።\n\n"
@@ -390,9 +387,9 @@ def handle_all_messages(message):
         query = text.strip().upper()
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, receiver_key, file_name, file_size FROM bin_files WHERE (file_name LIKE ? OR receiver_key LIKE ?) AND file_id != 'none'", (f'%{query}%', f'%{query}%'))
+        cursor.execute("SELECT id, receiver_key, file_name, file_size FROM bin_files WHERE (file_name LIKE ? OR receiver_key LIKE ?) AND file_id != 'none' ORDER BY file_name ASC", (f'%{query}%', f'%{query}%'))
         matching_files = cursor.fetchall()
-        cursor.execute("SELECT id, tv_key, file_name, file_size FROM tv_files WHERE file_name LIKE ? OR tv_key LIKE ?", (f'%{query}%', f'%{query}%'))
+        cursor.execute("SELECT id, tv_key, file_name, file_size FROM tv_files WHERE (file_name LIKE ? OR tv_key LIKE ?) ORDER BY file_name ASC", (f'%{query}%', f'%{query}%'))
         matching_tv_files = cursor.fetchall()
         conn.close()
 
@@ -445,7 +442,7 @@ def handle_all_messages(message):
         markup = InlineKeyboardMarkup()
         if is_admin:
             markup.row(InlineKeyboardButton(f"➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
-            markup.row(InlineKeyboardButton(f"📤 ፋይል ወደዚህ ፎልደር ጫን", callback_data=f"upload_to_{clean_text}"))
+            markup.row(InlineKeyboardButton(f"📤 ፋይል ወደዚ ፎልደር ጫን", callback_data=f"upload_to_{clean_text}"))
 
         for sf_id, sf_name in sub_folders:
             markup.row(InlineKeyboardButton(f"📁 {sf_name}", callback_data=f"open_sub_{sf_id}"))
@@ -491,52 +488,43 @@ def handle_inline_callbacks(call):
         sub_id = data.replace("open_sub_", "")
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT folder_name, receiver_key FROM sub_folders WHERE id = ?", (sub_id,))
+        
+        cursor.execute("SELECT folder_name FROM sub_folders WHERE id = ?", (sub_id,))
         sf_row = cursor.fetchone()
         if not sf_row:
             conn.close()
             bot.answer_callback_query(call.id, "⚠️ ፎልደሩ አልተገኘም!", show_alert=True)
             return
-        sf_name, r_key = sf_row
+        sf_name = sf_row[0]
         
-        # 📂 ንዑስ ፎልደሩ ውስጥ ያሉ ፋይሎችን ማምጣት
-        cursor.execute("SELECT id, file_name, file_size, file_id, downloads_count FROM bin_files WHERE sub_folder_id = ? ORDER BY file_name ASC", (sub_id,))
-        files = cursor.fetchall()
+        cursor.execute("SELECT id, file_name, file_size, file_id, downloads_count FROM bin_files WHERE sub_folder_id = ? ORDER BY file_name ASC LIMIT 1", (sub_id,))
+        file_row = cursor.fetchone()
         conn.close()
 
-        if not files:
-            bot.answer_callback_query(call.id, "⚠️ በዚህ ፎልደር ውስጥ ምንም ፋይል የለም!", show_alert=True)
+        if not file_row:
+            bot.answer_callback_query(call.id, f"⚠️ ለ '{sf_name}' እስካሁን ምንም ፋይል አልተጫነም!", show_alert=True)
             return
 
-        # 🚀 1. ፎልደሩ ውስጥ አንድ ፋይል ብቻ ካለ -> አውቶማቲክ ፋይሉን ይልካል!
-        if len(files) == 1:
-            f_id, f_name, f_size, f_file_id, d_count = files[0]
-            if f_file_id == "none":
-                bot.answer_callback_query(call.id, "ℹ️ ይህ የሞዴል ስም ብቻ ነው", show_alert=True)
-                return
-            
-            new_count = d_count + 1
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
-            conn.commit()
-            conn.close()
+        f_id, f_name, f_size, f_file_id, d_count = file_row
 
-            bot.answer_callback_query(call.id, "📥 ፋይሉ በአውቶማቲክ በመውረድ ላይ ነው...")
-            bot.send_document(chat_id, f_file_id, caption=f"✅ {f_name}\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ")
+        if f_file_id == "none" or not f_file_id:
+            bot.answer_callback_query(call.id, "⚠️ ፋይሉ አልተገኘም!", show_alert=True)
             return
 
-        # 📂 2. ከ አንድ በላይ ፋይሎች ካሉ ግን ዝርዝራቸውን በአዝራር ያሳያል
-        markup = InlineKeyboardMarkup()
-        if is_admin:
-            markup.row(InlineKeyboardButton(f"📤 ፋይል ወደ '{sf_name}' ጫን", callback_data=f"upload_sub_{sub_id}"))
+        new_count = d_count + 1
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
+        conn.commit()
+        conn.close()
 
-        for f_id, f_name, f_size, f_file_id, d_count in files:
-            if f_file_id != "none":
-                markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"), InlineKeyboardButton("❌ አጥፋ" if is_admin else "", callback_data=f"del_bin_{f_id}" if is_admin else f"ignore_{f_id}"))
-
-        bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"📂 **{sf_name}** ፎልደር ውስጥ ያሉ ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
+        bot.answer_callback_query(call.id, f"📥 {sf_name} ፋይል በመላክ ላይ ነው...")
+        bot.send_document(
+            chat_id, 
+            f_file_id, 
+            caption=f"✅ **{f_name}**\n📂 ፎልደር፦ `{sf_name}`\n📦 መጠን፦ {f_size}\n📥 የወረደበት ብዛት፦ {new_count} ጊዜ",
+            parse_mode="Markdown"
+        )
 
     elif data.startswith("upload_sub_") and is_admin:
         sub_id = data.replace("upload_sub_", "")
