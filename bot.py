@@ -7,15 +7,8 @@ from telebot import types
 
 # ----------------- CONFIGURATION (ENVIRONMENT VARIABLES) -----------------
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID_STR = os.getenv("ADMIN_ID")
+ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
-if not TOKEN:
-  raise ValueError("⚠️ የቦት ቶከን (BOT_TOKEN) አልተገኘም! እባክዎ Environment Variable ላይ ያስገቡ።")
-
-if not ADMIN_ID_STR:
-  raise ValueError("⚠️ የአድሚን ID (ADMIN_ID) አልተገኘም! እባክዎ Environment Variable ላይ ያስገቡ።")
-
-ADMIN_ID = int(ADMIN_ID_STR)
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 # Flask app for Render Keep-Alive
@@ -49,7 +42,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS brands (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
-            device_type TEXT, -- 'receiver' ወይም 'tv'
+            device_type TEXT,
             photo_id TEXT
         )
     """)
@@ -350,8 +343,7 @@ def add_brand_step1(message):
   markup.add(types.KeyboardButton("receiver"), types.KeyboardButton("tv"))
   msg = bot.send_message(
       message.chat.id,
-      "ይህንን ብራንድ የትኛው ምድብ ስር መመዝገብ ይፈልጋሉ? (ከታች ካሉት ይምረጡ ወይም ይጻፉ: receiver ወይም"
-      " tv)",
+      "ይህንን ብራንድ የትኛው ምድብ ስር መመዝገብ ይፈልጋሉ? (receiver ወይም tv)",
       reply_markup=markup,
   )
   bot.register_next_step_handler(msg, add_brand_step2)
@@ -362,7 +354,7 @@ def add_brand_step2(message):
   if device_type not in ["receiver", "tv"]:
     bot.send_message(
         message.chat.id,
-        "⚠️ የተሳሳተ ምድብ! እባክዎ እንደገና '➕ ብራንድ/ቲቪ/ሪሲቨር ጫን' የሚለውን በመጫን ይሞክሩ።",
+        "⚠️ የተሳሳተ ምድብ! እባክዎ እንደገና ይሞክሩ።",
     )
     return
 
@@ -378,7 +370,7 @@ def add_brand_step3(message, device_type):
   brand_name = message.text.strip()
   msg = bot.send_message(
       message.chat.id,
-      f"ለ '{brand_name}' ብራንድ የሚያሳይ **ፎቶ (Logo)** ይላኩ (ወይም 'skip' ብለው ይለፉ):",
+      f"ለ '{brand_name}' ብራንድ የሚያሳይ ፎቶ (Logo) ይላኩ (ወይም 'skip' ይበሉ):",
   )
   bot.register_next_step_handler(msg, add_brand_save, device_type, brand_name)
 
@@ -387,11 +379,6 @@ def add_brand_save(message, device_type, brand_name):
   photo_id = None
   if message.photo:
     photo_id = message.photo[-1].file_id
-  elif message.text and message.text.strip().lower() == "skip":
-    photo_id = None
-  else:
-    # ፎቶ ካልላከ በስተቀር በጽሁፍ skip ካለ ይለፋል፣ ካልሆነ ያለ ፎቶ ይመዝገበዋል
-    pass
 
   conn = get_db()
   cursor = conn.cursor()
@@ -423,7 +410,7 @@ def upload_file_step1(message):
   if not brands:
     bot.send_message(
         message.chat.id,
-        "⚠️ መጀመሪያ ብራንድ (ፎልደር) መፍጠር አለብዎት! እባክዎ '➕ ብራንድ/ቲቪ/ሪሲቨር ጫን' ይጠቀሙ።",
+        "⚠️ መጀመሪያ ብራንድ (ፎልደር) መፍጠር አለብዎት!",
     )
     return
 
@@ -437,7 +424,7 @@ def upload_file_step1(message):
 
   bot.send_message(
       message.chat.id,
-      "እባክዎ ፋይሉ የሚቀመጥበትን **ብራንድ (ፎልደር)** ከታች ይምረጡ፡",
+      "እባክዎ ፋይሉ የሚቀመጥበትን ብራንድ (ፎልደር) ይምረጡ፡",
       reply_markup=markup,
   )
 
@@ -449,8 +436,7 @@ def upload_file_step2(call):
   brand_id = int(call.data.split("_")[1])
   msg = bot.send_message(
       call.message.chat.id,
-      "📥 አሁን ሊጭኑት የሚፈልጉትን **ፋይል (Document)** ወደ ቦቱ ይላኩ (ሊንክ ሳይሆን ዱክመንት fileupload"
-      " አድርገው):",
+      "📥 ሊጭኑት የሚፈልጉትን ፋይል (Document) ወደ ቦቱ ይላኩ:",
   )
   bot.register_next_step_handler(msg, upload_file_save, brand_id)
   try:
@@ -463,14 +449,13 @@ def upload_file_save(message, brand_id):
   if not message.document:
     bot.send_message(
         message.chat.id,
-        "⚠️ የላኩት ፋይል ትክክለኛ ዱክመንት አይደለም። እባክዎ '📤 ፋይል ጫን' በመጫን እንደገና ይሞክሩ።",
+        "⚠️ የላኩት ፋይል ትክክለኛ ዱክመንት አይደለም።",
     )
     return
 
   file_id = message.document.file_id
   file_name = message.document.file_name or "Unknown Title"
   file_size_bytes = message.document.file_size
-  # ሳይዙን ወደ MB መቀየር
   file_size = (
       f"{round(file_size_bytes / (1024 * 1024), 2)} MB"
       if file_size_bytes
@@ -513,7 +498,7 @@ def delete_menu(message):
   )
   bot.send_message(
       message.chat.id,
-      "ምን መሰረዝ ይፈልጋሉ? ከታች ያለውን ይምረጡ:",
+      "ምን መሰረዝ ይፈልጋሉ?",
       reply_markup=markup,
   )
 
@@ -539,7 +524,7 @@ def delete_brand_list(call):
     )
 
   bot.edit_message_text(
-      "የሚሰርዙትን ብራንድ ይምረጡ (ማስታወሻ፦ ብራንዱ ሲጠፋ ስር ያሉ ፋይሎችም ይሰረዛሉ):",
+      "የሚሰርዙትን ብራንድ ይምረጡ:",
       call.message.chat.id,
       call.message.message_id,
       reply_markup=markup,
@@ -633,7 +618,7 @@ def broadcast_segment_prompt(message):
   )
   bot.send_message(
       message.chat.id,
-      "ማስታወቂያውን ለማስተላለፍ የሚፈልጉትን የተጠቃሚ ምድብ (Segment) ይምረጡ፡",
+      "ማስታወቂያውን ለማስተላለፍ የሚፈልጉትን የተጠቃሚ ምድብ ይምረጡ፡",
       reply_markup=markup,
   )
 
@@ -643,7 +628,7 @@ def receive_broadcast_message(call):
   target_group = call.data.split("_")[1]
   msg = bot.send_message(
       call.message.chat.id,
-      f"እባክዎ ለ [{target_group.upper()}] ሊልኩት የሚፈልጉትን መልዕክት (ጽሁፍ ወይም ፎቶ) ይጻፉ:",
+      f"እባክዎ ለ [{target_group.upper()}] ሊልኩት የሚፈልጉትን መልዕክት ይጻፉ:",
   )
   bot.register_next_step_handler(msg, execute_targeted_broadcast, target_group)
 
@@ -691,5 +676,5 @@ if __name__ == "__main__":
   t.daemon = True
   t.start()
 
-  print("Bot is starting polling securely with full admin management tools...")
+  print("Bot is starting polling securely with Environment Variables...")
   bot.infinity_polling()
