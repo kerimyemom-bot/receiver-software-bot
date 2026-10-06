@@ -54,13 +54,15 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS receivers (key TEXT PRIMARY KEY, caption TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS tv_software (key TEXT PRIMARY KEY, caption TEXT)")
-    cursor.execute("CREATE TABLE IF NOT EXISTS bin_files (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    # ንዑስ ፎልደሮች (Sub-folders) ቴብል
+    cursor.execute("CREATE TABLE IF NOT EXISTS sub_folders (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, folder_name TEXT)")
+    # ፋይሎች ከንዑስ ፎልደር መለያ (sub_folder_id) ጋር
+    cursor.execute("CREATE TABLE IF NOT EXISTS bin_files (id INTEGER PRIMARY KEY AUTOINCREMENT, receiver_key TEXT, sub_folder_id INTEGER DEFAULT 0, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE TABLE IF NOT EXISTS tv_files (id INTEGER PRIMARY KEY AUTOINCREMENT, tv_key TEXT, file_name TEXT, file_id TEXT, file_size TEXT, downloads_count INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, invited_by INTEGER, joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     cursor.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
     cursor.execute("CREATE TABLE IF NOT EXISTS payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, file_id TEXT, status TEXT DEFAULT 'PENDING', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
     
-    # ነባሪ ቻናል ማስቀመጫ
     cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('must_join_channel', '@your_channel_username')")
 
     default_receivers = ["FREE_SAT", "CORONATE", "MEWE", "TIGER", "LIFESTARE", "SUPERMAX", "GOLDSTAR", "LEG"]
@@ -227,85 +229,68 @@ def handle_all_messages(message):
 
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE.get(user_id), dict):
         state_data = ADMIN_STATE[user_id]
-        if state_data.get("state") == "WAITING_NEW_MODEL_NAME":
+        if state_data.get("state") == "WAITING_NEW_SUB_FOLDER":
             target_rcv = state_data["receiver_key"]
-            new_model = text.strip()
+            sub_name = text.strip()
             ADMIN_STATE.pop(user_id, None)
             conn = get_db_connection()
             cursor = conn.cursor()
             try:
-                cursor.execute("INSERT INTO bin_files (receiver_key, file_name, file_id, file_size) VALUES (?, ?, ?, ?)", 
-                               (target_rcv, f"Model: {new_model}", "none", "0 KB"))
+                cursor.execute("INSERT INTO sub_folders (receiver_key, folder_name) VALUES (?, ?)", (target_rcv, sub_name))
                 conn.commit()
-                bot.send_message(message.chat.id, f"✅ አዲስ ሞዴል **{new_model}** ለ **{target_rcv}** ተመዝግቧል!", reply_markup=main_menu(user_id, True))
+                bot.send_message(message.chat.id, f"✅  ሪሲቨር ስር **{sub_name}** የሚባል ንዑስ ፎልደር ተፈጥሯል!", reply_markup=main_menu(user_id, True))
             except Exception as e:
                 bot.send_message(message.chat.id, f"⚠️ ስህተት: {e}")
             conn.close()
             return
-        
-        elif state_data.get("state") == "WAITING_NEW_FOLDER_NAME":
-            ADMIN_STATE.pop(user_id, None)
-            new_key = text.strip().upper().replace(" ", "_")
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            try:
-                cursor.execute("INSERT INTO receivers (key, caption) VALUES (?, ?)", (new_key, f"{new_key} RECEIVER SOFTWARE"))
-                conn.commit()
-                bot.send_message(message.chat.id, f"✅ ሪሲቨር ፎልደር **{new_key}** ተፈጥሯል!", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
-            except sqlite3.IntegrityError:
-                bot.send_message(message.chat.id, "⚠️ ይህ ስም ያለው ፎልደር አለ።")
-            conn.close()
-            return
 
-        elif state_data.get("state") == "WAITING_NEW_TV_FOLDER_NAME":
-            ADMIN_STATE.pop(user_id, None)
-            new_key = text.strip().upper().replace(" ", "_")
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            try:
-                cursor.execute("INSERT INTO tv_software (key, caption) VALUES (?, ?)", (new_key, f"{new_key} TV SOFTWARE"))
-                conn.commit()
-                bot.send_message(message.chat.id, f"✅ ቲቪ ፎልደር **{new_key}** ተፈጥሯል!", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
-            except sqlite3.IntegrityError:
-                bot.send_message(message.chat.id, "⚠️ ይህ ስም ያለው ቲቪ ፎልደር አለ።")
-            conn.close()
-            return
-
-        elif state_data.get("state") in ["WAITING_FILE_UPLOAD", "WAITING_TV_FILE_UPLOAD"]:
+        elif state_data.get("state") == "WAITING_FILE_UPLOAD":
             if message.content_type != 'document':
-                bot.send_message(message.chat.id, "⚠️ እባክዎ ትክክለኛ ፋይል ወይም ዚፕ (.zip) ፋይል ይላኩ።")
+                markup = InlineKeyboardMarkup()
+                markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+                bot.send_message(message.chat.id, "⚠️ እባክዎ ትክክለኛ ፋይል ወይም ዚፕ (.zip) ፋይል ይላኩ።", reply_markup=markup)
                 return
 
+            target_rcv = state_data["target_receiver"]
+            sub_id = state_data.get("sub_folder_id", 0)
             file_name = message.document.file_name or "unknown_file.bin"
             file_size_bytes = message.document.file_size or 0
             file_size_str = f"{round(file_size_bytes / (1024 * 1024), 2)} MB" if file_size_bytes > 1024 * 1024 else f"{round(file_size_bytes / 1024, 2)} KB"
 
             conn = get_db_connection()
             cursor = conn.cursor()
+            cursor.execute("INSERT INTO bin_files (receiver_key, sub_folder_id, file_name, file_id, file_size) VALUES (?, ?, ?, ?, ?)", 
+                           (target_rcv, sub_id, file_name, message.document.file_id, file_size_str))
+            conn.commit()
+            conn.close()
 
-            if state_data.get("state") == "WAITING_FILE_UPLOAD":
-                target_rcv = state_data["target_receiver"]
-                cursor.execute("INSERT INTO bin_files (receiver_key, file_name, file_id, file_size) VALUES (?, ?, ?, ?)", 
-                               (target_rcv, file_name, message.document.file_id, file_size_str))
-                conn.commit()
-                conn.close()
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
+            bot.reply_to(message, f"🔥 **አዲስ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📂 ፎልደር፦ **{target_rcv}**", parse_mode="Markdown", reply_markup=markup)
+            return
 
+        elif state_data.get("state") == "WAITING_TV_FILE_UPLOAD":
+            if message.content_type != 'document':
                 markup = InlineKeyboardMarkup()
-                markup.row(InlineKeyboardButton(f"📁 ፎልደሩን ክፈት", callback_data=f"folder_rcv_{target_rcv}"))
-                markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
-                bot.reply_to(message, f"🔥 **አዲስ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📂 ፎልደር፦ **{target_rcv}**", parse_mode="Markdown", reply_markup=markup)
+                markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+                bot.send_message(message.chat.id, "⚠️️ እባክዎ ትክክለኛ ፋይል ወይም ዚፕ (.zip) ፋይል ይላኩ።", reply_markup=markup)
+                return
 
-            elif state_data.get("state") == "WAITING_TV_FILE_UPLOAD":
-                target_tv = state_data["target_tv"]
-                cursor.execute("INSERT INTO tv_files (tv_key, file_name, file_id, file_size) VALUES (?, ?, ?, ?)", 
-                               (target_tv, file_name, message.document.file_id, file_size_str))
-                conn.commit()
-                conn.close()
+            target_tv = state_data["target_tv"]
+            file_name = message.document.file_name or "unknown_file.bin"
+            file_size_bytes = message.document.file_size or 0
+            file_size_str = f"{round(file_size_bytes / (1024 * 1024), 2)} MB" if file_size_bytes > 1024 * 1024 else f"{round(file_size_bytes / 1024, 2)} KB"
 
-                markup = InlineKeyboardMarkup()
-                markup.row(InlineKeyboardButton(f"📺 ቲቪ ፎልደሩን ክፈት", callback_data=f"folder_tv_{target_tv}"))
-                markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
-                bot.reply_to(message, f"🔥 **አዲስ ቲቪ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📺 ፎልደር፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO tv_files (tv_key, file_name, file_id, file_size) VALUES (?, ?, ?, ?)", 
+                           (target_tv, file_name, message.document.file_id, file_size_str))
+            conn.commit()
+            conn.close()
+
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
+            bot.reply_to(message, f"🔥 **አዲስ ቲቪ ሶፍትዌር ተለቀቀ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📺 ፎልደር፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
             return
 
     if not is_admin and message.content_type == 'photo':
@@ -453,21 +438,25 @@ def handle_all_messages(message):
     if clean_text in receivers:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, file_name, file_size, file_id FROM bin_files WHERE receiver_key = ? ORDER BY id DESC", (clean_text,))
-        files_data = cursor.fetchall()
+        cursor.execute("SELECT id, folder_name FROM sub_folders WHERE receiver_key = ?", (clean_text,))
+        sub_folders = cursor.fetchall()
+        cursor.execute("SELECT id, file_name, file_size, file_id FROM bin_files WHERE receiver_key = ? AND sub_folder_id = 0 ORDER BY id DESC", (clean_text,))
+        root_files = cursor.fetchall()
         conn.close()
 
         markup = InlineKeyboardMarkup()
         if is_admin:
-            markup.row(InlineKeyboardButton(f"➕ አዲስ ሞዴል ለ {clean_text} ጨምር", callback_data=f"add_model_{clean_text}"))
-            
-        for f_id, f_name, f_size, f_file_id in files_data:
-            if f_file_id == "none":
-                markup.row(InlineKeyboardButton(f"📌 {f_name}", callback_data=f"ignore_{f_id}"), InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_bin_{f_id}"))
-            else:
+            markup.row(InlineKeyboardButton(f"➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
+            markup.row(InlineKeyboardButton(f"📤 ፋይል ወደዚህ ፎልደር ጫን", callback_data=f"upload_to_{clean_text}"))
+
+        for sf_id, sf_name in sub_folders:
+            markup.row(InlineKeyboardButton(f"📂 {sf_name}", callback_data=f"open_sub_{sf_id}"))
+
+        for f_id, f_name, f_size, f_file_id in root_files:
+            if f_file_id != "none":
                 markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"), InlineKeyboardButton("❌ አጥፋ" if is_admin else "", callback_data=f"del_bin_{f_id}" if is_admin else f"ignore_{f_id}"))
-            
-        bot.send_message(message.chat.id, f"📁 **{clean_text}** ሪሲቨር ፋይሎች እና ሞዴሎች፦", reply_markup=markup, parse_mode="Markdown")
+
+        bot.send_message(message.chat.id, f"📁 **{clean_text}** ሪሲቨር ፎልደሮች እና ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
         return
 
     if clean_text in tvs:
@@ -492,31 +481,78 @@ def handle_inline_callbacks(call):
     user_id = call.from_user.id
     is_admin = (user_id == SUPER_ADMIN_ID)
 
-    if data == "adm_upload_sw" and is_admin:
+    if data.startswith("create_sub_") and is_admin:
+        r_key = data.replace("create_sub_", "")
+        ADMIN_STATE[user_id] = {"state": "WAITING_NEW_SUB_FOLDER", "receiver_key": r_key}
+        bot.answer_callback_query(call.id)
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, f"✍️ ለ **{r_key}** የሚሆን አዲስ ንዑስ ፎልደር ስም ይጻፉልኝ:", reply_markup=markup)
+
+    elif data.startswith("open_sub_"):
+        sub_id = data.replace("open_sub_", "")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT folder_name, receiver_key FROM sub_folders WHERE id = ?", (sub_id,))
+        sf_row = cursor.fetchone()
+        if not sf_row:
+            conn.close()
+            bot.answer_callback_query(call.id, "⚠️ ፎልደሩ አልተገኘም!", show_alert=True)
+            return
+        sf_name, r_key = sf_row
+        cursor.execute("SELECT id, file_name, file_size, file_id FROM bin_files WHERE sub_folder_id = ? ORDER BY id DESC", (sub_id,))
+        files = cursor.fetchall()
+        conn.close()
+
+        markup = InlineKeyboardMarkup()
+        if is_admin:
+            markup.row(InlineKeyboardButton(f"📤 ፋይል ወደ '{sf_name}' ጫን", callback_data=f"upload_sub_{sub_id}"))
+
+        for f_id, f_name, f_size, f_file_id in files:
+            if f_file_id != "none":
+                markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"), InlineKeyboardButton("❌ አጥፋ" if is_admin else "", callback_data=f"del_bin_{f_id}" if is_admin else f"ignore_{f_id}"))
+
+        bot.answer_callback_query(call.id)
+        bot.send_message(chat_id, f"📂 **{sf_name}** ፎልደር ውስጥ ያሉ ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
+
+    elif data.startswith("upload_sub_") and is_admin:
+        sub_id = data.replace("upload_sub_", "")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT folder_name, receiver_key FROM sub_folders WHERE id = ?", (sub_id,))
+        sf_row = cursor.fetchone()
+        conn.close()
+        if sf_row:
+            sf_name, r_key = sf_row
+            ADMIN_STATE[user_id] = {"state": "WAITING_FILE_UPLOAD", "target_receiver": r_key, "sub_folder_id": int(sub_id)}
+            bot.answer_callback_query(call.id)
+            markup = InlineKeyboardMarkup()
+            markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+            bot.send_message(chat_id, f"📥 ለ **{sf_name}** ፎልደር ፋይል አሁን ይላኩልኝ።", reply_markup=markup)
+
+    elif data.startswith("upload_to_") and is_admin:
+        r_key = data.replace("upload_to_", "")
+        ADMIN_STATE[user_id] = {"state": "WAITING_FILE_UPLOAD", "target_receiver": r_key, "sub_folder_id": 0}
+        bot.answer_callback_query(call.id)
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, f"📥 ለ **{r_key}** ዋና ፎልደር ፋይል አሁን ይላኩልኝ።", reply_markup=markup)
+
+    elif data == "adm_upload_sw" and is_admin:
         receivers = get_all_receivers()
         markup = InlineKeyboardMarkup()
         for r_key in receivers:
             markup.row(InlineKeyboardButton(f"📁 {r_key}", callback_data=f"upload_to_{r_key}"))
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "📤 የየትኛው ሪሲቨር ሶፍትዌር መጫን ይፈልጋሉ?", reply_markup=markup)
-
-    elif data.startswith("upload_to_") and is_admin:
-        r_key = data.replace("upload_to_", "")
-        ADMIN_STATE[user_id] = {"state": "WAITING_FILE_UPLOAD", "target_receiver": r_key}
-        bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"📥 ለ **{r_key}** ፋይል አሁን ይላኩልኝ።")
-
-    elif data.startswith("add_model_") and is_admin:
-        r_key = data.replace("add_model_", "")
-        ADMIN_STATE[user_id] = {"state": "WAITING_NEW_MODEL_NAME", "receiver_key": r_key}
-        bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"✍️ ለ **{r_key}** የሚሆን አዲስ የሞዴል ስም ይጻፉልኝ:")
 
     elif data == "adm_upload_tv" and is_admin:
         tvs = get_all_tvs()
         markup = InlineKeyboardMarkup()
         for t_key in tvs:
             markup.row(InlineKeyboardButton(f"📺 {t_key}", callback_data=f"upload_tv_{t_key}"))
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "📤 የየትኛው ቲቪ ሶፍትዌር መጫን ይፈልጋሉ?", reply_markup=markup)
 
@@ -524,23 +560,30 @@ def handle_inline_callbacks(call):
         t_key = data.replace("upload_tv_", "")
         ADMIN_STATE[user_id] = {"state": "WAITING_TV_FILE_UPLOAD", "target_tv": t_key}
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"📥 ለ **{t_key}** ቲቪ ፋይል አሁን ይላኩልኝ።")
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, f"📥 ለ **{t_key}** ቲቪ ፋይል አሁን ይላኩልኝ።", reply_markup=markup)
 
     elif data == "adm_create_folder" and is_admin:
         ADMIN_STATE[user_id] = {"state": "WAITING_NEW_FOLDER_NAME"}
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "📁 አዲስ የሪሲቨር ፎልደር ስም ይጻፉልኝ:")
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, "📁 አዲስ የሪሲቨር ፎልደር ስም ይጻፉልኝ:", reply_markup=markup)
 
     elif data == "adm_create_tv_folder" and is_admin:
         ADMIN_STATE[user_id] = {"state": "WAITING_NEW_TV_FOLDER_NAME"}
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "📺 አዲስ ቲቪ ፎልደር ስም ይጻፉልኝ:")
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, "📺 አዲስ ቲቪ ፎልደር ስም ይጻፉልኝ:", reply_markup=markup)
 
     elif data == "adm_manage_sw" and is_admin:
         receivers = get_all_receivers()
         markup = InlineKeyboardMarkup()
         for r_key in receivers:
             markup.row(InlineKeyboardButton(f"❌ ፎልደር ሰርዝ: {r_key}", callback_data=f"del_folder_{r_key}"))
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "🗑 ለመሰረዝ ሪሲቨር ይምረጡ:", reply_markup=markup)
 
@@ -549,6 +592,7 @@ def handle_inline_callbacks(call):
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM bin_files WHERE receiver_key = ?", (r_key,))
+        cursor.execute("DELETE FROM sub_folders WHERE receiver_key = ?", (r_key,))
         cursor.execute("DELETE FROM receivers WHERE key = ?", (r_key,))
         conn.commit()
         conn.close()
@@ -559,6 +603,7 @@ def handle_inline_callbacks(call):
         markup = InlineKeyboardMarkup()
         for t_key in tvs:
             markup.row(InlineKeyboardButton(f"❌ ፎልደር ሰርዝ: {t_key}", callback_data=f"del_tv_folder_{t_key}"))
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "🗑 ለመሰረዝ ቲቪ ፎልደር ይምረጡ:", reply_markup=markup)
 
@@ -579,7 +624,7 @@ def handle_inline_callbacks(call):
         cursor.execute("DELETE FROM bin_files WHERE id = ?", (f_id,))
         conn.commit()
         conn.close()
-        bot.answer_callback_query(call.id, "🗑 ፋይሉ/ሞዴሉ ተሰርዟል!", show_alert=True)
+        bot.answer_callback_query(call.id, "🗑 ፋይሉ ተሰርዟል!", show_alert=True)
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except Exception:
@@ -601,13 +646,17 @@ def handle_inline_callbacks(call):
     elif data == "adm_broadcast" and is_admin:
         ADMIN_STATE[user_id] = "WAITING_BROADCAST"
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, "📢 ለሁሉም ተጠቃሚዎች መላክ የሚፈልጉትን (ፎቶ፣ ቪዲዮ ወይም ጽሑፍ) አሁን ይላኩ:")
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, "📢 ለሁሉም ተጠቃሚዎች መላክ የሚፈልጉትን (ፎቶ፣ ቪዲዮ ወይም ጽሑፍ) አሁን ይላኩ:", reply_markup=markup)
 
     elif data == "adm_set_channel" and is_admin:
         ADMIN_STATE[user_id] = "WAITING_CHANNEL_UPDATE"
         bot.answer_callback_query(call.id)
         current_ch = get_must_join_channel()
-        bot.send_message(chat_id, f"⚙️ አሁን ያለው ቻናል: `{current_ch}`\n\nአዲሱን የቻናል ዩዘርናም (ለምሳሌ @newchannel) ይጻፉልኝ:")
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back (ሰርዝ)", callback_data="cancel_upload"))
+        bot.send_message(chat_id, f"⚙️ አሁን ያለው ቻናል: `{current_ch}`\n\nአዲሱን የቻናል ዩዘርናም (ለምሳሌ @newchannel) ይጻፉልኝ:", reply_markup=markup)
 
     elif data == "adm_backup" and is_admin:
         bot.answer_callback_query(call.id, "💾 ባክአፕ በመላክ ላይ...", show_alert=False)
@@ -702,40 +751,13 @@ def handle_inline_callbacks(call):
             conn.close()
             bot.answer_callback_query(call.id, "⚠️ ፋይሉ አልተገኘም!", show_alert=True)
 
-    elif data.startswith("folder_rcv_"):
-        rcv = data.replace("folder_rcv_", "")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, file_name, file_size, file_id FROM bin_files WHERE receiver_key = ? ORDER BY id DESC", (rcv,))
-        files_data = cursor.fetchall()
-        conn.close()
-        bot.answer_callback_query(call.id)
-        markup = InlineKeyboardMarkup()
-        if is_admin:
-            markup.row(InlineKeyboardButton(f"➕ አዲስ ሞዴል ለ {rcv} ጨምር", callback_data=f"add_model_{rcv}"))
-        for f_id, f_name, f_size, f_file_id in files_data:
-            if f_file_id == "none":
-                markup.row(InlineKeyboardButton(f"📌 {f_name}", callback_data=f"ignore_{f_id}"), InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_bin_{f_id}"))
-            else:
-                markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"), InlineKeyboardButton("❌ አጥፋ" if is_admin else "", callback_data=f"del_bin_{f_id}" if is_admin else f"ignore_{f_id}"))
-        bot.send_message(chat_id, f"📁 **{rcv}** ሪሲቨር ውስጥ ያሉ ፋይሎች:", reply_markup=markup, parse_mode="Markdown")
-
-    elif data.startswith("folder_tv_"):
-        tv = data.replace("folder_tv_", "")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, file_name, file_size FROM tv_files WHERE tv_key = ? ORDER BY id DESC", (tv,))
-        files_data = cursor.fetchall()
-        conn.close()
-        bot.answer_callback_query(call.id)
-        markup = InlineKeyboardMarkup()
-        for f_id, f_name, f_size in files_data:
-            markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"), InlineKeyboardButton("❌ አጥፋ" if is_admin else "", callback_data=f"del_tv_{f_id}" if is_admin else f"ignore_{f_id}"))
-        bot.send_message(chat_id, f"📺 **{tv}** ቲቪ ፎልደር ውስጥ ያሉ ፋይሎች:", reply_markup=markup, parse_mode="Markdown")
-
     elif data == "cancel_upload":
         ADMIN_STATE.pop(user_id, None)
-        bot.answer_callback_query(call.id, "✅ ተጠናቋል።", show_alert=True)
+        bot.answer_callback_query(call.id, "✅ ተሰርዟል!", show_alert=True)
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception:
+            pass
         bot.send_message(chat_id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, True))
 
 bot.infinity_polling()
