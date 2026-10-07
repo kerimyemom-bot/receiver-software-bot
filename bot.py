@@ -26,6 +26,7 @@ keep_alive()
 TOKEN = os.environ.get("TOKEN", "YOUR_TOKEN_HERE")
 SUPER_ADMIN_ID = int(os.environ.get("SUPER_ADMIN_ID", "123456789"))
 DB_PATH = os.environ.get("DB_PATH", "bot_database.db")
+PHOTO_FILE_ID = os.environ.get("PHOTO_FILE_ID", "YOUR_PHOTO_FILE_ID_HERE")
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -120,7 +121,7 @@ def check_user_joined(user_id):
     return False
 
 def clean_key(text):
-    for char in ["🔹", "🔷", "✨", "🛒", "💻", "📚", "⭐", "🔥", "🔍", "⏱", "❓", "🌐", "⚙", "📺", "📌", "📁", "📂"]:
+    for char in ["🔹", "🔷", "✨", "🛒", "💻", "📚", "⭐", "🔥", "🔍", "⏱", "❓", "🌐", "⚙", "📺", "📌", "📁", "📂", "🔲"]:
         text = text.replace(char, "")
     return text.strip().replace(" ", "_").upper()
 
@@ -153,8 +154,16 @@ def main_menu(user_id, is_admin=False):
 
 def receivers_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    receivers = get_all_receivers()
-    buttons = [KeyboardButton(f"📁 {name.replace('_', ' ')}") for name in receivers]
+    buttons = [
+        KeyboardButton("🔲 CORONATE"),
+        KeyboardButton("🔲 FREE SAT"),
+        KeyboardButton("🔲 GOLDSTAR"),
+        KeyboardButton("🔲 LEG"),
+        KeyboardButton("🔲 LIFESTARE"),
+        KeyboardButton("🔲 MEWE"),
+        KeyboardButton("🔲 SUPERMAX"),
+        KeyboardButton("🔲 TIGER")
+    ]
     for i in range(0, len(buttons), 2):
         markup.row(*buttons[i:i+2])
     markup.row(KeyboardButton("🔙 Back"), KeyboardButton("🔝 Main Menu"))
@@ -186,7 +195,12 @@ def send_welcome(message):
 
     register_user(user_id, username, invited_by)
     is_admin = (user_id == SUPER_ADMIN_ID)
-    bot.send_message(message.chat.id, "✨ ሰላም! እንኳን ወደ ሪሲቨር እና ቲቪ ሶፍትዌር ማከማቻ ቦት በደህና መጡ።", reply_markup=main_menu(user_id, is_admin))
+    
+    welcome_text = "✨ ሰላም! እንኳን ወደ ሪሲቨር እና ቲቪ ሶፍትዌር ማከማቻ ቦት በደህና መጡ።"
+    try:
+        bot.send_photo(message.chat.id, PHOTO_FILE_ID, caption=welcome_text, reply_markup=main_menu(user_id, is_admin), parse_mode="Markdown")
+    except Exception:
+        bot.send_message(message.chat.id, welcome_text, reply_markup=main_menu(user_id, is_admin), parse_mode="Markdown")
 
 @bot.message_handler(content_types=['document', 'photo', 'video', 'text'])
 def handle_all_messages(message):
@@ -397,15 +411,24 @@ def handle_all_messages(message):
 
     if text in ["🔝 Main Menu", "🔙 Back"]:
         ADMIN_STATE.pop(user_id, None)
-        bot.send_message(message.chat.id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin))
+        try:
+            bot.send_photo(message.chat.id, PHOTO_FILE_ID, caption="ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin), parse_mode="Markdown")
+        except Exception:
+            bot.send_message(message.chat.id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, is_admin))
         return
 
     if "እቃ ለመግዛት" in text:
-        bot.send_message(message.chat.id, BUY_ITEM_TEXT, parse_mode="Markdown")
+        try:
+            bot.send_photo(message.chat.id, PHOTO_FILE_ID, caption=BUY_ITEM_TEXT, parse_mode="Markdown")
+        except Exception:
+            bot.send_message(message.chat.id, BUY_ITEM_TEXT, parse_mode="Markdown")
         return
 
     if "SERVER ለመግዛት" in text:
-        bot.send_message(message.chat.id, SERVER_INFO_TEXT, parse_mode="Markdown")
+        try:
+            bot.send_photo(message.chat.id, PHOTO_FILE_ID, caption=SERVER_INFO_TEXT, parse_mode="Markdown")
+        except Exception:
+            bot.send_message(message.chat.id, SERVER_INFO_TEXT, parse_mode="Markdown")
         return
 
     if "ጓደኛጋብዝ" in text or "Referral" in text:
@@ -421,7 +444,10 @@ def handle_all_messages(message):
             f"👥 እስካሁን የጋበዟቸው ሰዎች ብዛት፦ **{ref_count}** ሰው\n\n"
             f"*(ይህንን ሊንክ ለጓደኞችዎ በመላክ ቦቱን እንዲጠቀሙ ጋብዟቸው!)*"
         )
-        bot.send_message(message.chat.id, ref_msg, parse_mode="Markdown")
+        try:
+            bot.send_photo(message.chat.id, PHOTO_FILE_ID, caption=ref_msg, parse_mode="Markdown")
+        except Exception:
+            bot.send_message(message.chat.id, ref_msg, parse_mode="Markdown")
         return
 
     if text == "🔥 አዲስ የተለቀቁ":
@@ -481,7 +507,6 @@ def handle_all_messages(message):
         if is_admin:
             markup.row(InlineKeyboardButton("➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
 
-        # 👈 ንዑስ ፎልደሮቹን በሁለት ረድፍ (2 columns) አቀማመጥ ማስተካከል
         sub_buttons = [InlineKeyboardButton(f"{sf_name}", callback_data=f"open_sub_{sf_id}") for sf_id, sf_name in sub_folders]
         for i in range(0, len(sub_buttons), 2):
             markup.row(*sub_buttons[i:i+2])
@@ -789,6 +814,9 @@ def handle_inline_callbacks(call):
             bot.delete_message(chat_id, call.message.message_id)
         except Exception:
             pass
-        bot.send_message(chat_id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, True))
+        try:
+            bot.send_photo(chat_id, PHOTO_FILE_ID, caption="ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
+        except Exception:
+            bot.send_message(chat_id, "ወደ ዋናው ማውጫ ተመለሰ:", reply_markup=main_menu(user_id, True))
 
 bot.infinity_polling()
