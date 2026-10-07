@@ -195,7 +195,6 @@ def handle_all_messages(message):
     is_admin = (user_id == SUPER_ADMIN_ID)
     text = message.text or ""
 
-    # ተጠቃሚው 'supre2350' ወይም ቁጥር ብቻ ሲልክ አውቶማቲክ ለመላክ
     clean_msg = text.strip().lower()
     if clean_msg.startswith("supre"):
         clean_msg = clean_msg.replace("supre", "")
@@ -465,12 +464,13 @@ def handle_all_messages(message):
 
         markup = InlineKeyboardMarkup()
         if is_admin:
-            markup.row(InlineKeyboardButton(f"➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
+            markup.row(InlineKeyboardButton("➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
 
+        # 👈 ምንም አይነት ተጨማሪ ምልክት ሳይኖረው ልክ እንደ ሁለተኛው ምስል ጸዳ ያለ አቀማመጥ
         for sf_id, sf_name in sub_folders:
-            markup.row(InlineKeyboardButton(f"📂 {sf_name}", callback_data=f"open_sub_{sf_id}"))
+            markup.row(InlineKeyboardButton(f"{sf_name}", callback_data=f"open_sub_{sf_id}"))
 
-        bot.send_message(message.chat.id, f"📁 **{clean_text}** ንዑስ ፎልደሮች፦", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"📂 **{clean_text} ፎልደሮች፦**", reply_markup=markup, parse_mode="Markdown")
         return
 
     if clean_text in tvs:
@@ -484,13 +484,13 @@ def handle_all_messages(message):
         for f_id, f_name, f_size in files_data:
             if is_admin:
                 markup.row(
-                    InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"),
+                    InlineKeyboardButton(f"{f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"),
                     InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_tv_{f_id}")
                 )
             else:
-                markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"))
+                markup.row(InlineKeyboardButton(f"{f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"))
             
-        bot.send_message(message.chat.id, f"📺 **{clean_text}** ቲቪ ፎልደር ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"📺 **{clean_text}** ቲቪ ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
         return
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -580,7 +580,7 @@ def handle_inline_callbacks(call):
         markup = InlineKeyboardMarkup()
         for f_id, f_name, f_size in files:
             markup.row(
-                InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"),
+                InlineKeyboardButton(f"{f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"),
                 InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_bin_{f_id}")
             )
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
@@ -604,10 +604,10 @@ def handle_inline_callbacks(call):
             pass
         return
 
-    # 🔥 ሁለተኛው ፎልደር (ንዑስ ፎልደር) ሲነካ ፋይሎቹን በአውቶማቲክ በቀጥታ የሚልክበት ክፍል
+    # 👈 ንዑስ ፎልደሩ ሲነካ ያንዳች ተጨማሪ ጫጫታ በቀጥታ በአውቶማቲክ ፋይሉን የሚልክበት ክፍል
     if data.startswith("open_sub_"):
         sub_id = data.replace("open_sub_", "")
-        bot.answer_callback_query(call.id, "📥 ፋይሉ በአውቶማቲክ በመውረድ ላይ ነው...")
+        bot.answer_callback_query(call.id, "📥 ፋይሉ በመውረድ ላይ ነው...")
         
         try:
             conn = get_db_connection()
@@ -683,7 +683,7 @@ def handle_inline_callbacks(call):
         markup = InlineKeyboardMarkup()
         for f_id, f_name, f_size in files:
             markup.row(
-                InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"),
+                InlineKeyboardButton(f"{f_name} ({f_size})", callback_data=f"dl_tv_{f_id}"),
                 InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_tv_{f_id}")
             )
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
