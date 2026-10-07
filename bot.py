@@ -195,6 +195,35 @@ def handle_all_messages(message):
     is_admin = (user_id == SUPER_ADMIN_ID)
     text = message.text or ""
 
+    # ተጠቃሚው 'supre2350' ወይም ቁጥር ብቻ ሲልክ አውቶማቲክ ለመላክ
+    clean_msg = text.strip().lower()
+    if clean_msg.startswith("supre"):
+        clean_msg = clean_msg.replace("supre", "")
+
+    if clean_msg.isdigit():
+        f_id = int(clean_msg)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT file_name, file_size, file_id, downloads_count FROM bin_files WHERE id = ?", (f_id,))
+        row = cursor.fetchone()
+        
+        if row:
+            f_name, f_size, f_file_id, d_count = row
+            new_count = d_count + 1
+            cursor.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
+            conn.commit()
+            conn.close()
+
+            try:
+                bot.send_document(message.chat.id, f_file_id, caption=f"✅ ፋይል፦ `{f_name}`\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ", parse_mode="Markdown")
+            except Exception as e:
+                logging.error(f"Error auto-sending file: {e}")
+                bot.reply_to(message, "⚠️ ፋይሉን ማስተላለፍ አልተቻለም።")
+        else:
+            conn.close()
+            bot.reply_to(message, f"⚠️ በ ID ({f_id}) የተመዘገበ ፋይል አልተገኘም!")
+        return
+
     if is_admin and user_id in ADMIN_STATE and ADMIN_STATE.get(user_id) == "WAITING_BROADCAST":
         ADMIN_STATE.pop(user_id, None)
         conn = get_db_connection()
@@ -575,30 +604,34 @@ def handle_inline_callbacks(call):
             pass
         return
 
+    # 🔥 ሁለተኛው ፎልደር (ንዑስ ፎልደር) ሲነካ ፋይሎቹን በአውቶማቲክ በቀጥታ የሚልክበት ክፍል
     if data.startswith("open_sub_"):
         sub_id = data.replace("open_sub_", "")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT folder_name, receiver_key FROM sub_folders WHERE id = ?", (sub_id,))
-        sf_row = cursor.fetchone()
+        bot.answer_callback_query(call.id, "📥 ፋይሉ በአውቶማቲክ በመውረድ ላይ ነው...")
         
-        cursor.execute("SELECT id, file_name, file_size FROM bin_files WHERE sub_folder_id = ? ORDER BY id DESC", (sub_id,))
-        files = cursor.fetchall()
-        conn.close()
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, file_name, file_size, file_id, downloads_count FROM bin_files WHERE sub_folder_id = ? ORDER BY id DESC", (sub_id,))
+            files = cursor.fetchall()
+            conn.close()
 
-        markup = InlineKeyboardMarkup()
-        for f_id, f_name, f_size in files:
-            if is_admin:
-                markup.row(
-                    InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"),
-                    InlineKeyboardButton("❌ አጥፋ", callback_data=f"del_bin_{f_id}")
-                )
+            if files:
+                for f_id, f_name, f_size, f_file_id, d_count in files:
+                    new_count = d_count + 1
+                    
+                    conn_update = get_db_connection()
+                    cur_update = conn_update.cursor()
+                    cur_update.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
+                    conn_update.commit()
+                    conn_update.close()
+
+                    bot.send_document(chat_id, f_file_id, caption=f"✅ ፋይል፦ `{f_name}`\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ", parse_mode="Markdown")
             else:
-                markup.row(InlineKeyboardButton(f"📥 {f_name} ({f_size})", callback_data=f"dl_bin_{f_id}"))
-
-        sf_name = sf_row[0] if sf_row else "ፎልደር"
-        bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, f"📂 **{sf_name}** ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
+                bot.send_message(chat_id, "⚠️ በዚህ ፎልደር ስር ምንም ፋይል አልተገኘም!")
+        except Exception as e:
+            logging.error(f"Error auto-sending subfolder files: {e}")
+            bot.send_message(chat_id, f"⚠️ ፋይሉን በሚልክበት ጊዜ ስህተት ተፈጥሯል: {e}")
         return
 
     if data == "adm_upload_tv" and is_admin:
