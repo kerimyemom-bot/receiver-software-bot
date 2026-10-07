@@ -270,6 +270,21 @@ def handle_all_messages(message):
             bot.send_message(message.chat.id, f"📂 ለ **{target_rcv}** የሚሆን **{sub_name}** ንዑስ ፎልደር ተፈጥሯል!", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
             return
 
+        elif state_data.get("state") == "WAITING_NEW_CHANNEL":
+            new_channel = text.strip()
+            if not new_channel.startswith("@"):
+                new_channel = "@" + new_channel
+            ADMIN_STATE.pop(user_id, None)
+            
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE settings SET value = ? WHERE key = 'must_join_channel'", (new_channel,))
+            conn.commit()
+            conn.close()
+            
+            bot.send_message(message.chat.id, f"✅ ቻናሉ በተሳካ ሁኔታ ወደ **{new_channel}** ተቀይሯል!", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
+            return
+
         elif state_data.get("state") == "WAITING_FILE_UPLOAD":
             if message.content_type != 'document':
                 markup = InlineKeyboardMarkup()
@@ -466,9 +481,10 @@ def handle_all_messages(message):
         if is_admin:
             markup.row(InlineKeyboardButton("➕ ንዑስ ፎልደር ፍጠር", callback_data=f"create_sub_{clean_text}"))
 
-        # 👈 ምንም አይነት ተጨማሪ ምልክት ሳይኖረው ልክ እንደ ሁለተኛው ምስል ጸዳ ያለ አቀማመጥ
-        for sf_id, sf_name in sub_folders:
-            markup.row(InlineKeyboardButton(f"{sf_name}", callback_data=f"open_sub_{sf_id}"))
+        # 👈 ንዑስ ፎልደሮቹን በሁለት ረድፍ (2 columns) አቀማመጥ ማስተካከል
+        sub_buttons = [InlineKeyboardButton(f"{sf_name}", callback_data=f"open_sub_{sf_id}") for sf_id, sf_name in sub_folders]
+        for i in range(0, len(sub_buttons), 2):
+            markup.row(*sub_buttons[i:i+2])
 
         bot.send_message(message.chat.id, f"📂 **{clean_text} ፎልደሮች፦**", reply_markup=markup, parse_mode="Markdown")
         return
@@ -509,6 +525,14 @@ def handle_inline_callbacks(call):
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
         bot.answer_callback_query(call.id)
         bot.send_message(chat_id, "📁 ፋይሉ የሚጫንበትን የሪሲቨር ብራንድ ይምረጡ፦", reply_markup=markup)
+        return
+
+    if data == "adm_set_channel" and is_admin:
+        ADMIN_STATE[user_id] = {"state": "WAITING_NEW_CHANNEL"}
+        bot.answer_callback_query(call.id)
+        markup = InlineKeyboardMarkup()
+        markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
+        bot.send_message(chat_id, "⚙️ አዲስ ማካተት/መቀየር የሚፈልጉትን የቻናል ዩዘርናም (ለምሳሌ: `@your_channel`) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
         return
 
     if data.startswith("rcv_up_target_") and is_admin:
@@ -604,7 +628,6 @@ def handle_inline_callbacks(call):
             pass
         return
 
-    # 👈 ንዑስ ፎልደሩ ሲነካ ያንዳች ተጨማሪ ጫጫታ በቀጥታ በአውቶማቲክ ፋይሉን የሚልክበት ክፍል
     if data.startswith("open_sub_"):
         sub_id = data.replace("open_sub_", "")
         bot.answer_callback_query(call.id, "📥 ፋይሉ በመውረድ ላይ ነው...")
