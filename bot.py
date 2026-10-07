@@ -604,7 +604,7 @@ def handle_inline_callbacks(call):
         bot.answer_callback_query(call.id)
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
-        bot.send_message(chat_id, f"✍️ ለ **{rcv_key}** የሚሆን አዲስ ንዑስ ፎልደር ስም (ለምሳሌ: Version 2) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(chat_id, f"✍️ ለ **{rcv_key}** የሚሆን አዲስ ንዑስ ፎልደር ስም (ለምሳሌ: Version 2) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
         return
 
     if data == "adm_manage_sw" and is_admin:
