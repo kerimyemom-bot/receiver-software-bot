@@ -216,7 +216,6 @@ def handle_all_messages(message):
     if is_admin and user_id in ADMIN_STATE and isinstance(ADMIN_STATE.get(user_id), dict):
         state_data = ADMIN_STATE[user_id]
         
-        # 1. ሪሲቨር አዲስ ብራንድ (ፎልደር) መፍጠር
         if state_data.get("state") == "WAITING_NEW_RECEIVER":
             rcv_name = text.strip().upper()
             ADMIN_STATE.pop(user_id, None)
@@ -231,7 +230,6 @@ def handle_all_messages(message):
             conn.close()
             return
 
-        # 2. ንዑስ ፎልደር (Sub-folder) መፍጠር
         elif state_data.get("state") == "WAITING_SUB_FOLDER_NAME":
             target_rcv = state_data["receiver_key"]
             sub_name = text.strip()
@@ -244,7 +242,6 @@ def handle_all_messages(message):
             bot.send_message(message.chat.id, f"📂 ለ **{target_rcv}** የሚሆን **{sub_name}** ንዑስ ፎልደር ተፈጥሯል!", reply_markup=main_menu(user_id, True), parse_mode="Markdown")
             return
 
-        # 3. ሪሲቨር ሶፍትዌር (ፋይል) አፕሎድ ማድረግ
         elif state_data.get("state") == "WAITING_FILE_UPLOAD":
             if message.content_type != 'document':
                 markup = InlineKeyboardMarkup()
@@ -265,12 +262,14 @@ def handle_all_messages(message):
             conn.commit()
             conn.close()
 
+            # ፋይሉ ከተመዘገበ በኋላ ስቴቱን እናጸዳዋለን ድጋሚ ስህተት እንዳይፈጥር
+            ADMIN_STATE.pop(user_id, None)
+
             markup = InlineKeyboardMarkup()
             markup.row(InlineKeyboardButton("❌ አፕሎድ ጨርሻለሁ (Done)", callback_data="cancel_upload"))
             bot.reply_to(message, f"🔥 **አዲስ ሪሲቨር ሶፍትዌር ተጫነ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n📂 ፎልደር፦ **{target_rcv}**", parse_mode="Markdown", reply_markup=markup)
             return
 
-        # 4. ቲቪ ሶፍትዌር አፕሎድ ማድረግ
         elif state_data.get("state") == "WAITING_TV_UPLOAD":
             if message.content_type != 'document':
                 markup = InlineKeyboardMarkup()
@@ -296,7 +295,6 @@ def handle_all_messages(message):
             bot.reply_to(message, f"📺 **አዲስ ቲቪ ሶፍትዌር ተጫነ!**\n📄 ፋይል፦ `{file_name}` ({file_size_str})\n🏷 ብራንድ፦ **{target_tv}**", parse_mode="Markdown", reply_markup=markup)
             return
 
-        # 5. አዲስ የቲቪ ብራንድ መፍጠር
         elif state_data.get("state") == "WAITING_NEW_TV_BRAND":
             tv_name = text.strip().upper()
             ADMIN_STATE.pop(user_id, None)
@@ -475,7 +473,6 @@ def handle_inline_callbacks(call):
     user_id = call.from_user.id
     is_admin = (user_id == SUPER_ADMIN_ID)
 
-    # --- ሪሲቨር አጫጫን፣ ፎልደር መፍጠር እና ማስተዳደር (Receiver Callbacks) ---
     if data == "adm_upload_sw" and is_admin:
         receivers = get_all_receivers()
         markup = InlineKeyboardMarkup()
@@ -605,7 +602,6 @@ def handle_inline_callbacks(call):
         bot.send_message(chat_id, f"📂 **{sf_name}** ፋይሎች፦", reply_markup=markup, parse_mode="Markdown")
         return
 
-    # --- ቲቪ አጫጫን እና ማስተዳደር (TV Callbacks) ---
     if data == "adm_upload_tv" and is_admin:
         tvs = get_all_tvs()
         markup = InlineKeyboardMarkup()
