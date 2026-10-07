@@ -262,7 +262,6 @@ def handle_all_messages(message):
             conn.commit()
             conn.close()
 
-            # ፋይሉ ከተመዘገበ በኋላ ስቴቱን እናጸዳዋለን ድጋሚ ስህተት እንዳይፈጥር
             ADMIN_STATE.pop(user_id, None)
 
             markup = InlineKeyboardMarkup()
@@ -518,7 +517,7 @@ def handle_inline_callbacks(call):
         bot.answer_callback_query(call.id)
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
-        bot.send_message(chat_id, "✍️ አዲስ መፍጠር የሚፈልጉትን የሪሲቨር ብራንድ ስም (ለምሳሌ STARX) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
+        bot.send_message(chat_id, f"✍️ አዲስ መፍጠር የሚፈልጉትን የሪሲቨር ብራንድ ስም (ለምሳሌ STARX) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
         return
 
     if data.startswith("create_sub_") and is_admin:
@@ -626,7 +625,7 @@ def handle_inline_callbacks(call):
         bot.answer_callback_query(call.id)
         markup = InlineKeyboardMarkup()
         markup.row(InlineKeyboardButton("🔙 Back", callback_data="cancel_upload"))
-        bot.send_message(chat_id, "✍️ አዲስ መፍጠር የሚፈልጉትን የቲቪ ብራንድ ስም (ለምሳሌ SONY) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
+        bot.send_message(chat_id, f"✍️ አዲስ መፍጠር የሚፈልጉትን የቲቪ ብራንድ ስም (ለምሳሌ SONY) ጽሁፍ ልከው ያስመዝግቡ:", reply_markup=markup)
         return
 
     if data == "adm_manage_tv" and is_admin:
@@ -677,48 +676,54 @@ def handle_inline_callbacks(call):
 
     if data.startswith("dl_bin_"):
         f_id = data.replace("dl_bin_", "")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_size, file_id, downloads_count FROM bin_files WHERE id = ?", (f_id,))
-        row = cursor.fetchone()
-        if row:
-            f_name, f_size, f_file_id, d_count = row
-            new_count = d_count + 1
-            cursor.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
-            conn.commit()
-            conn.close()
+        bot.answer_callback_query(call.id, "📥 ፋይሉ በመውረድ ላይ ነው...")
+        
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_name, file_size, file_id, downloads_count FROM bin_files WHERE id = ?", (f_id,))
+            row = cursor.fetchone()
+            
+            if row:
+                f_name, f_size, f_file_id, d_count = row
+                new_count = d_count + 1
+                cursor.execute("UPDATE bin_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
+                conn.commit()
+                conn.close()
 
-            bot.answer_callback_query(call.id, "📥 ፋይሉ በመውረድ ላይ ነው...")
-            try:
                 bot.send_document(chat_id, f_file_id, caption=f"✅ ፋይል፦ `{f_name}`\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ", parse_mode="Markdown")
-            except Exception as e:
-                bot.send_message(chat_id, f"⚠️ ፋይሉን መላክ አልተቻለም: {e}")
-        else:
-            conn.close()
-            bot.answer_callback_query(call.id, "⚠️ ፋይሉ አልተገኘም!", show_alert=True)
+            else:
+                conn.close()
+                bot.send_message(chat_id, f"⚠️ በ ID ({f_id}) የተመዘገበ ፋይል በሰርቨር ዳታቤዝ ውስጥ አልተገኘም!")
+        except Exception as e:
+            logging.error(f"Error in dl_bin_: {e}")
+            bot.send_message(chat_id, f"⚠️ ፋይሉን በሚልክበት ጊዜ ስህተት ተፈጥሯል: {e}")
         return
 
     if data.startswith("dl_tv_"):
         f_id = data.replace("dl_tv_", "")
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT file_name, file_size, file_id, downloads_count FROM tv_files WHERE id = ?", (f_id,))
-        row = cursor.fetchone()
-        if row:
-            f_name, f_size, f_file_id, d_count = row
-            new_count = d_count + 1
-            cursor.execute("UPDATE tv_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
-            conn.commit()
-            conn.close()
+        bot.answer_callback_query(call.id, "📥 ቲቪ ሶፍትዌር በመውረድ ላይ ነው...")
+        
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_name, file_size, file_id, downloads_count FROM tv_files WHERE id = ?", (f_id,))
+            row = cursor.fetchone()
+            
+            if row:
+                f_name, f_size, f_file_id, d_count = row
+                new_count = d_count + 1
+                cursor.execute("UPDATE tv_files SET downloads_count = ? WHERE id = ?", (new_count, f_id))
+                conn.commit()
+                conn.close()
 
-            bot.answer_callback_query(call.id, "📥 ቲቪ ሶፍትዌር በመውረድ ላይ ነው...")
-            try:
                 bot.send_document(chat_id, f_file_id, caption=f"✅ ቲቪ ሶፍትዌር፦ `{f_name}`\n📦 መጠን: {f_size}\n📥 የወረደበት ብዛት: {new_count} ጊዜ", parse_mode="Markdown")
-            except Exception as e:
-                bot.send_message(chat_id, f"⚠️ ፋይሉን መላክ አልተቻለም: {e}")
-        else:
-            conn.close()
-            bot.answer_callback_query(call.id, "⚠️ ፋይሉ አልተገኘም!", show_alert=True)
+            else:
+                conn.close()
+                bot.send_message(chat_id, f"⚠️ በ ID ({f_id}) የተመዘገበ የቲቪ ፋይል አልተገኘም!")
+        except Exception as e:
+            logging.error(f"Error in dl_tv_: {e}")
+            bot.send_message(chat_id, f"⚠️ ፋይሉን በሚልክበት ጊዜ ስህተት ተፈጥሯል: {e}")
         return
 
     if data == "cancel_upload":
